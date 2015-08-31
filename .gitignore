@@ -3,3 +3,4 @@ fft2d
 *.txt
 *.aux
 runDFT.sh
+*.swp
