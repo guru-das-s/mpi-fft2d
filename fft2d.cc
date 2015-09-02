@@ -30,33 +30,9 @@ void Transform1D(Complex* h, int w, Complex* H)
   
   Complex sum;  // Sum of all W[k]*h[k] inner loop products
 
-  /* Testing out this object thing */
-  //W.real = 3; W.imag = 4;
-  //cout<<"This complex number is "<<W<<endl;
-  
   /* Build the 1-D transform formula */
   int n, k;
-  cout<<"Starting 1-D transform computation"<<endl;
-
- // for(n=0; n<N; n++){
- //   sum.real = 0; sum.imag = 0;
- //   for(k=0; k<N; k++){
- //     W.real = cos(2*M_PI*n*k/N); W.imag = -sin(2*M_PI*n*k/N);
- //     sum = sum + (W * h[k]);
- //   }
- //   H[n].real = sum.real;
- //   H[n].imag = sum.imag;
- // }
-
- // for(n=N; n<2*N; n++){
- //   sum.real = 0; sum.imag = 0;
- //   for(k=0; k<N; k++){
- //     W.real = cos(2*M_PI*n*k/N); W.imag = -sin(2*M_PI*n*k/N);
- //     sum = sum + (W * h[N+k]);
- //   }
- //   H[n].real = sum.real;
- //   H[n].imag = sum.imag;
- // }
+  cout<<"  1-D transform computation\t\t";
 
   for(row=0; row<N; row++)
     for(n=N*row; n<N*(row+1); n++){
@@ -69,8 +45,7 @@ void Transform1D(Complex* h, int w, Complex* H)
       H[n].imag = sum.imag;
     } 
 
-
-  cout<<"1-D transform computation complete"<<endl;
+  cout<<"[ OK ]"<<endl<<endl;
 }
 
 void Transform2D(const char* inputFN) 
@@ -109,10 +84,46 @@ void Transform2D(const char* inputFN)
 
   /* Step 5:  Do 1-D transform of input image */
   //          As an initial step, forget about MPI, just get 1-D transform right
-  Transform1D(h, 256/**256*/, H);
+  cout<<endl; // For formatting output nicely 
+  Transform1D(h, 256, H);
 
-  /* Step XX: Save 1-D transform image data for debug */
+  /* Step VV: Save 1-D transform image data for debug */
   image.SaveImageData("MyAfter1d.txt", H, width, height);
+  cout<<"  File written: MyAfter1d.txt\t\t[ OK ]"<<endl<<endl;
+
+  /* Step WW: Do Transpose of intermediate 1-D transform array */
+  int N = 256; Complex temp;
+  
+  for(int row=0; row<N; row++)
+    for(int column=0; column<N; column++)
+        if(row < column){
+          //temp.real = H[N*row + column].real; temp.imag = H[N*row + column].imag; 
+          //H[N*row + column].real = H[N*column + row].real; H[N*row + column].imag = H[N*column + row].imag;
+          //H[N*column + row].real = temp.real; H[N*column + row].imag = temp.imag;
+
+          temp= H[N*row + column]; 
+          H[N*row + column]= H[N*column + row];
+          H[N*column + row] = temp;
+        }
+  cout<<"  Post 1-D transpose \t\t\t[ OK ]"<<endl<<endl;
+
+  /* Step XX: Do 1-D transform again on the transpose array */
+  Complex* H_final = new Complex[width * height];
+  Transform1D(H, 256, H_final);
+
+  /* Step YY: Do Transpose of second intermediate H_final array for final result */
+  for(int row=0; row<N; row++)
+    for(int column=0; column<N; column++)
+        if(row < column){
+          temp= H_final[N*row + column]; 
+          H_final[N*row + column]= H_final[N*column + row];
+          H_final[N*column + row] = temp;
+        }
+  cout<<"  Post 2-D transpose \t\t\t[ OK ]"<<endl<<endl;
+
+  /* Step ZZ: Finally, write the 2-D transform values to disk */
+  image.SaveImageData("MyAfter2d.txt", H_final, width, height);
+  cout<<"  File written: MyAfter2d.txt\t\t[ OK ]"<<endl<<endl;
 }
 
 
