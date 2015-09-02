@@ -48,6 +48,18 @@ void Transform1D(Complex* h, int w, Complex* H)
   cout<<"[ OK ]"<<endl<<endl;
 }
 
+void transpose(Complex* mat, int N){
+  Complex temp;
+
+  for(int row=0; row<N; row++)
+    for(int column=0; column<N; column++)
+        if(row < column){
+          temp= mat[N*row + column]; 
+          mat[N*row + column]= mat[N*column + row];
+          mat[N*column + row] = temp;
+        }
+}
+
 void Transform2D(const char* inputFN) 
 { // Do the 2D transform here.
   // 1) Use the InputImage object to read in the Tower.txt file and
@@ -92,19 +104,7 @@ void Transform2D(const char* inputFN)
   cout<<"  File written: MyAfter1d.txt\t\t[ OK ]"<<endl<<endl;
 
   /* Step WW: Do Transpose of intermediate 1-D transform array */
-  int N = 256; Complex temp;
-  
-  for(int row=0; row<N; row++)
-    for(int column=0; column<N; column++)
-        if(row < column){
-          //temp.real = H[N*row + column].real; temp.imag = H[N*row + column].imag; 
-          //H[N*row + column].real = H[N*column + row].real; H[N*row + column].imag = H[N*column + row].imag;
-          //H[N*column + row].real = temp.real; H[N*column + row].imag = temp.imag;
-
-          temp= H[N*row + column]; 
-          H[N*row + column]= H[N*column + row];
-          H[N*column + row] = temp;
-        }
+  transpose(H, 256);
   cout<<"  Post 1-D transpose \t\t\t[ OK ]"<<endl<<endl;
 
   /* Step XX: Do 1-D transform again on the transpose array */
@@ -112,13 +112,7 @@ void Transform2D(const char* inputFN)
   Transform1D(H, 256, H_final);
 
   /* Step YY: Do Transpose of second intermediate H_final array for final result */
-  for(int row=0; row<N; row++)
-    for(int column=0; column<N; column++)
-        if(row < column){
-          temp= H_final[N*row + column]; 
-          H_final[N*row + column]= H_final[N*column + row];
-          H_final[N*column + row] = temp;
-        }
+  transpose(H_final, 256);
   cout<<"  Post 2-D transpose \t\t\t[ OK ]"<<endl<<endl;
 
   /* Step ZZ: Finally, write the 2-D transform values to disk */
