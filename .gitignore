@@ -4,3 +4,4 @@ fft2d
 *.aux
 runDFT.sh
 *.swp
+*.swo
