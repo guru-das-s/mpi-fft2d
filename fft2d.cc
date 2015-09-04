@@ -18,7 +18,7 @@
 
 using namespace std;
 
-void Transform1D(Complex* h, int w, Complex* H, int startrow, int rows_per_CPU)
+void Transform1D(Complex* h, int w, Complex* H, int startrow, int rows_per_CPU, int D)
 {
   // Implement a simple 1-d DFT using the double summation equation
   // given in the assignment handout.  h is the time-domain input
@@ -33,8 +33,7 @@ void Transform1D(Complex* h, int w, Complex* H, int startrow, int rows_per_CPU)
 
   /* Build the 1-D transform formula */
   int n, k;
-  // cout<<"Rank - "<<(startrow/rows_per_CPU)<<"  1-D transform computation\t\t";
-  printf("  (Rank %2d)  1-D transform computation\t\t", (startrow/rows_per_CPU));
+  printf("  (Rank %2d)  %d-D transform computation\t\t", (startrow/rows_per_CPU), D);
 
   for(row=startrow; row<(startrow + rows_per_CPU); row++)
     for(n=N*row; n<N*(row+1); n++){
@@ -55,11 +54,11 @@ void transpose(Complex* mat, int N){
 
   for(int row=0; row<N; row++)
     for(int column=0; column<N; column++)
-        if(row < column){
-          temp= mat[N*row + column]; 
-          mat[N*row + column]= mat[N*column + row];
-          mat[N*column + row] = temp;
-        }
+      if(row < column){
+        temp= mat[N*row + column]; 
+        mat[N*row + column]= mat[N*column + row];
+        mat[N*column + row] = temp;
+      }
 }
 
 void Transform2D(const char* inputFN) 
@@ -93,11 +92,8 @@ void Transform2D(const char* inputFN)
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
   /* ----- :  Calculate number of rows per CPU and startrow */
-
-  //rank = 15; /******* TODO TODO TODO Remove this! This is just for testing! *******/
-
-  int rows_per_CPU = height / 16/******* TODO nCPUs ********/;    //cout<<"rows_per_CPU = "<<rows_per_CPU<<endl;
-  int startrow = rows_per_CPU * rank;                             //cout<<"startrow = "<<startrow<<endl;
+  int rows_per_CPU = height / 16/******* TODO nCPUs ********/;
+  int startrow = rows_per_CPU * rank;
   
   /* Step 3:  Create the H array that contains the 2-D DFT results */
   Complex* H = new Complex[width * height];
@@ -106,42 +102,22 @@ void Transform2D(const char* inputFN)
   Complex* h = image.GetImageData();
 
   /* Step 5:  Do 1-D transform of input image */
-  // If you are rank 0, then no need to send anything, just calculate your bit
-  // and sit tight and quietly receive everything from everyone else and put
-  // the data in the proper rows of the H array.
-  Transform1D(h, 256, H, startrow, rows_per_CPU);
+  Transform1D(h, 256, H, startrow, rows_per_CPU, 1);
 
-  // // REMOVE THIS!!!!!!!!!!!!!
-  // int a[16];
-  // for(int i=0; i<16; i++)
-  //   a[i] = i; 
-
-  if(rank != 0/*== 5*/){
-    /* Advance H pointer to the right place for the purpose of sending to CPU 0 */
-    // H = H + (startrow * 256);
+  /* Step GG: Stitch together pieces of 1D X-formed image, gathering from all CPUs */
+  if(rank != 0){
+    /* Send your section of the 1-D transformed image to CPU 0 */
     int rc = MPI_Send(&H[startrow*256], rows_per_CPU * 256 * sizeof(Complex), MPI_CHAR, 0, 0, MPI_COMM_WORLD);
     if(rc != MPI_SUCCESS){
       cerr<<"Error sending data to CPU 0. Exiting.\n";
       MPI_Finalize(); exit(1);
     }
-    // 
-    // ---------------------------------------------------------------------------------------------
-    // 
-    
-    // if(rank == 1 || rank == 3){
-    //   int rc = MPI_Send(&a[rank], 2*sizeof(int), MPI_CHAR, 0, 0, MPI_COMM_WORLD);
-    //   if(rc != MPI_SUCCESS){
-    //     cerr<<"Error sending data to CPU 0. Exiting.\n";
-    //     MPI_Finalize(); exit(1);
-    //   }
-    // }
 
   } else if (rank == 0){
+    /* Collect parts of the 1-D transformed image from rest of CPUs and stitch them together */
     MPI_Status status; int rc;
     MPI_Request request;
     for(int cpu=1; cpu<nCPUs; cpu++){
-      // int cpu = 5; // CHAAAAAAAAAAAAAAAANNNNNNNNNNNGEEEEEEEEEEEE this!
-      // H = H + (rows_per_CPU * 256 * (cpu-1)); 
       rc = MPI_Irecv(&H[rows_per_CPU*cpu*256], rows_per_CPU * 256 * sizeof(Complex), MPI_CHAR, cpu, 0, MPI_COMM_WORLD, &request);
       if(rc != MPI_SUCCESS){
         cerr<<"Error receiving data from CPU "<<cpu<<". Exiting.\n";
@@ -150,64 +126,74 @@ void Transform2D(const char* inputFN)
       MPI_Wait(&request, &status);
       printf("  (Rank %2d)  Part of 1-D X-form received \t[ OK ]\n\n",cpu);
     }
+
     /* Step VV: Save 1-D transform image data for debug */
     image.SaveImageData("MyAfter1d.txt", H, width, height);
     cout<<"  ---- File written ----: MyAfter1d.txt\t\t[ OK ]"<<endl<<endl;
-    // 
-    // -----------------------------------------------------------------------------------
-    // 
-    // int b[1]; MPI_Status status; MPI_Request request;
-    // for(int cpu = 1; cpu<nCPUs; cpu++){
-    //   int rc = MPI_Irecv(b, sizeof(double), MPI_INT, cpu, 0, MPI_COMM_WORLD, &request);
-    //   if(rc != MPI_SUCCESS){
-    //     cerr<<"Error receiving data from CPU "<<cpu<<". Exiting.\n";
-    //     MPI_Finalize(); exit(1);
-    //   }
-    //   MPI_Wait(&request, &status);
-    //   cout<<"  Received data: "<<b[0]<<" from CPU "<<cpu<<endl;
-    // }
-    // 
-    // ------------------------------------------------------------------------------------
-    // 
 
-    // int *b = (int *) calloc(16,sizeof(int)); b[0] = 0;
-    // MPI_Status status; MPI_Request request;
-    // for(int cpu = 1; cpu<5; cpu+=2){
-    //   // b = b + cpu;
-    //   int rc = MPI_Irecv(&b[cpu], 2*sizeof(int), MPI_CHAR, cpu, 0, MPI_COMM_WORLD, &request);
-    //   if(rc != MPI_SUCCESS){
-    //     cerr<<"Error receiving data from CPU "<<cpu<<". Exiting.\n";
-    //     MPI_Finalize(); exit(1);
-    //   }
-    //   MPI_Wait(&request, &status);
-    //   cout<<"  Received data: "<<b[cpu]<<" from CPU "<<cpu<<endl;
-    // }
+    /* Step WW: Do Transpose of intermediate 1-D transform array */
+    transpose(H, 256);
+    printf("  (Rank %2d)  Transpose of 1-D transformed image [ OK ]\n\n",rank);
+  }
+  
+  /* Step MM: Send entire Transpose of 1-D transformed image to all other CPUs */
+  if(rank==0){
+    /* Send to all CPUs */
+    MPI_Status status; MPI_Request request; int rc;
+    for(int cpu=1; cpu<nCPUs; cpu++){
+      rc = MPI_Isend(H, 256*256*sizeof(Complex), MPI_CHAR, cpu, 0, MPI_COMM_WORLD, &request);
+      if(rc != MPI_SUCCESS){
+        cerr<<"Error sending Tranpose of image to CPU "<<cpu<<". Exiting.\n";
+        MPI_Finalize(); exit(1);
+      }
+      MPI_Wait(&request, &status);
+    }    
 
-    // cout<<"Final result = ";
-    // for(int cpu = 0; cpu<nCPUs; cpu++){
-    //   cout<<b[cpu]<<" ";
-    // }
-    // cout<<endl;
-
+  } else {
+    /* Receive from CPU 0 */
+    MPI_Status status; MPI_Request request; int rc;
+    rc = MPI_Irecv(H, 256*256*sizeof(Complex), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &request);
+    if(rc != MPI_SUCCESS){
+      cerr<<"Error receiving Tranpose of image from CPU 0. Exiting.\n";
+      MPI_Finalize(); exit(1);
+    }
+    MPI_Wait(&request, &status);    
   }
 
-  
+  /* Step XX: Do 1-D transform again on the transpose array using MPI */
+  Complex* H_final = new Complex[width * height];
+  Transform1D(H, 256, H_final, startrow, rows_per_CPU, 2);
 
-  ///* Step WW: Do Transpose of intermediate 1-D transform array */
-  //transpose(H, 256);
-  //cout<<"  Post 1-D transpose \t\t\t[ OK ]"<<endl<<endl;
+  /* Step NN: Stitch together pieces of 2D X-formed image, gathering from all CPUs */
+  if(rank != 0){
+    /* Send your section of the 1-D transformed image to CPU 0 */
+    int rc = MPI_Send(&H_final[startrow*256], rows_per_CPU * 256 * sizeof(Complex), MPI_CHAR, 0, 0, MPI_COMM_WORLD);
+    if(rc != MPI_SUCCESS){
+      cerr<<"Error sending data to CPU 0. Exiting.\n";
+      MPI_Finalize(); exit(1);
+    }
 
-  ///* Step XX: Do 1-D transform again on the transpose array */
-  //Complex* H_final = new Complex[width * height];
-  //Transform1D(H, 256, H_final);
+  } else if (rank == 0){
+    /* Collect parts of the 1-D transformed image from rest of CPUs and stitch them together */
+    MPI_Status status; MPI_Request request; int rc;
+    for(int cpu=1; cpu<nCPUs; cpu++){
+      rc = MPI_Irecv(&H_final[rows_per_CPU*cpu*256], rows_per_CPU * 256 * sizeof(Complex), MPI_CHAR, cpu, 0, MPI_COMM_WORLD, &request);
+      if(rc != MPI_SUCCESS){
+        cerr<<"Error receiving data from CPU "<<cpu<<". Exiting.\n";
+        MPI_Finalize(); exit(1);
+      }
+      MPI_Wait(&request, &status);
+      printf("  (Rank %2d)  Part of 1-D X-form received \t[ OK ]\n\n",cpu);
+    }
 
-  ///* Step YY: Do Transpose of second intermediate H_final array for final result */
-  //transpose(H_final, 256);
-  //cout<<"  Post 2-D transpose \t\t\t[ OK ]"<<endl<<endl;
+    /* Step WW: Do Transpose of intermediate 1-D transform array */
+    transpose(H_final, 256);
+    printf("  (Rank %2d)  Transpose of 2-D transformed image [ OK ]\n\n",rank);
 
-  ///* Step ZZ: Finally, write the 2-D transform values to disk */
-  //image.SaveImageData("MyAfter2d.txt", H_final, width, height);
-  //cout<<"  File written: MyAfter2d.txt\t\t[ OK ]"<<endl<<endl;
+    /* Step VV: Save 2-D transform image data for debug */
+    image.SaveImageData("MyAfter2d.txt", H_final, width, height);
+    cout<<"  ---- File written ----: MyAfter2d.txt\t\t[ OK ]"<<endl<<endl;
+  }
 }
 
 
@@ -224,10 +210,13 @@ int main(int argc, char** argv)
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-  string fn("Tower.txt"); // default file name
-  if (argc > 1) fn = string(argv[1]);  // if name specified on cmd line
-  Transform2D(fn.c_str()); // Perform the transform.
-  // cout<<"Rank - "<<rank<<"  Exiting normally.\n"<<endl;
+  string fn("Tower.txt");               // default file name
+  if (argc > 1) fn = string(argv[1]);   // if name specified on cmd line
+  Transform2D(fn.c_str());              // Perform the transform.
+
   printf("   Rank %2d   EXIT\t\t\t\t  --\n\n", rank);
+
   MPI_Finalize();
+
+  return 0;
 }  
