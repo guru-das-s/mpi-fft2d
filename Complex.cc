@@ -80,7 +80,8 @@ std::ostream& operator << (std::ostream &os, const Complex& c)
 {
   if (c.imag == 0)
     { // just real part with no parens
-      os << c.real;
+      if(c.real > 1e-5) os << c.real;
+      else os << 0;
     }
   else
     {
