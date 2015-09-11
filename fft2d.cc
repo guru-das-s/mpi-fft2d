@@ -49,6 +49,36 @@ void Transform1D(Complex* h, int w, Complex* H, int startrow, int rows_per_CPU, 
   cout<<"[ OK ]"<<endl<<endl;
 }
 
+void Inverse1D(Complex* H, int w, Complex* h, int startrow, int rows_per_CPU, int D)
+{
+  // Implement an inverse 1-d DFT
+  // H is the input transform array, h is the output inverse'd array
+
+  int N = w;    // For convenience's sake
+  int row;
+  
+  Complex W;    // This is the W in the formula
+  
+  Complex sum;  // Sum of all W[k]*h[k] inner loop products
+
+  /* Build the 1-D inverse transform formula */
+  int n, k;
+  printf("  (Rank %2d)  %d-D inverse transform computation\t", (startrow/rows_per_CPU), D);
+
+  for(row=startrow; row<(startrow + rows_per_CPU); row++)
+    for(n=N*row; n<N*(row+1); n++){
+      sum.real = 0; sum.imag = 0;
+      for(k=0; k<N; k++){
+        W.real = cos(2*M_PI*n*k/N); W.imag = sin(2*M_PI*n*k/N);
+        sum = sum + (W * H[(N*row) + k]);
+      }
+      h[n].real = (1/ (float)(N))*sum.real;
+      h[n].imag = (1/ (float)(N))*sum.imag;
+    } 
+
+  cout<<"[ OK ]"<<endl<<endl;
+}
+
 void transpose(Complex* mat, int N){
   Complex temp;
 
@@ -186,13 +216,138 @@ void Transform2D(const char* inputFN)
       printf("  (Rank %2d)  Part of 1-D X-form received \t[ OK ]\n\n",cpu);
     }
 
-    /* Step WW: Do Transpose of intermediate 1-D transform array */
+    /* Step WW: Do Transpose of final 2-D transform array */
     transpose(H_final, 256);
     printf("  (Rank %2d)  Transpose of 2-D transformed image [ OK ]\n\n",rank);
 
     /* Step VV: Save 2-D transform image data for debug */
     image.SaveImageData("MyAfter2d.txt", H_final, width, height);
     cout<<"  ---- File written ----: MyAfter2d.txt\t\t[ OK ]"<<endl<<endl;
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------------------------
+
+  /* Step SS: Create copy of H_final, H_final_copy that holds the entire H_final image */
+  Complex* H_final_copy = new Complex[width * height];
+
+  /* Step FF: Send entire 2-D transformed image to all other CPUs for their local copy */
+  if(rank==0){
+    /* Send to all CPUs */
+    MPI_Status status; MPI_Request request; int rc;
+    for(int cpu=1; cpu<nCPUs; cpu++){
+      rc = MPI_Isend(H_final, 256*256*sizeof(Complex), MPI_CHAR, cpu, 0, MPI_COMM_WORLD, &request);
+      if(rc != MPI_SUCCESS){
+        cerr<<"Error sending 2D Tranpose of image to CPU "<<cpu<<". Exiting.\n";
+        MPI_Finalize(); exit(1);
+      }
+      MPI_Wait(&request, &status);
+    }    
+
+  } else {
+    /* Receive from CPU 0 */
+    MPI_Status status; MPI_Request request; int rc;
+    rc = MPI_Irecv(H_final_copy, 256*256*sizeof(Complex), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &request);
+    if(rc != MPI_SUCCESS){
+      cerr<<"Error receiving 2D Tranpose of image from CPU 0. Exiting.\n";
+      MPI_Finalize(); exit(1);
+    }
+    MPI_Wait(&request, &status);    
+  }
+
+ /* Step BB: Do inverse transform on the transpose array using MPI */
+ Complex* h_inverse = new Complex[width * height];
+ if(rank != 0)
+   Inverse1D(H_final_copy, 256, h_inverse , startrow, rows_per_CPU, 1);
+ else
+   Inverse1D(H_final, 256, h_inverse , startrow, rows_per_CPU, 1);
+
+  /* Step TT: Stitch together pieces of 1D inverted image, gathering from all CPUs */
+ if(rank != 0){
+ /* Send your section of the 1-D transformed image to CPU 0 */
+ int rc = MPI_Send(&h_inverse[startrow*256], rows_per_CPU * 256 * sizeof(Complex), MPI_CHAR, 0, 0, MPI_COMM_WORLD);
+ if(rc != MPI_SUCCESS){
+   cerr<<"Error sending data to CPU 0. Exiting.\n";
+   MPI_Finalize(); exit(1);
+ }
+
+ } else if (rank == 0){
+    /* Collect parts of the 1-D inverted image from rest of CPUs and stitch them together */
+    MPI_Status status; int rc;
+    MPI_Request request;
+    for(int cpu=1; cpu<nCPUs; cpu++){
+      rc = MPI_Irecv(&h_inverse[rows_per_CPU*cpu*256], rows_per_CPU * 256 * sizeof(Complex), MPI_CHAR, cpu, 0, MPI_COMM_WORLD, &request);
+    if(rc != MPI_SUCCESS){
+        cerr<<"Error receiving data from CPU "<<cpu<<". Exiting.\n";
+        MPI_Finalize(); exit(1);
+      }
+      MPI_Wait(&request, &status);
+      printf("  (Rank %2d)  Part of 1-D inverted image received \t[ OK ]\n\n",cpu);
+    }
+
+   /* Step EE: Do Transpose of intermediate 1-D inverted array */
+   transpose(h_inverse, 256);
+   printf("  (Rank %2d)  Transpose of 1-D inverted image \t[ OK ]\n\n",rank);
+ }
+
+ //   if(rank == 0)
+ //     image.SaveImageData("Inverted_trans_0.txt", h_inverse, width, height);
+  /* Step AA: Send entire Transpose of 1-D inverted image to all other CPUs */
+  if(rank==0){
+    /* Send to all CPUs */
+    MPI_Status status; MPI_Request request; int rc;
+    for(int cpu=1; cpu<nCPUs; cpu++){
+      rc = MPI_Isend(h_inverse, 256*256*sizeof(Complex), MPI_CHAR, cpu, 0, MPI_COMM_WORLD, &request);
+      if(rc != MPI_SUCCESS){
+        cerr<<"Error sending Tranpose of image to CPU "<<cpu<<". Exiting.\n";
+        MPI_Finalize(); exit(1);
+      }
+      MPI_Wait(&request, &status);
+    }    
+
+  } else {
+    /* Receive from CPU 0 */
+    MPI_Status status; MPI_Request request; int rc;
+    rc = MPI_Irecv(h_inverse, 256*256*sizeof(Complex), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &request);
+    if(rc != MPI_SUCCESS){
+      cerr<<"Error receiving Tranpose of image from CPU 0. Exiting.\n";
+      MPI_Finalize(); exit(1);
+    }
+    MPI_Wait(&request, &status);    
+  }
+
+  /* Step ZZ: Do 1-D transform again on the transpose array using MPI */
+  Complex* h_inverse_final = new Complex[width * height];
+  Inverse1D(h_inverse, 256, h_inverse_final, startrow, rows_per_CPU, 2);
+
+  /* Step QQ: Stitch together pieces of 2D inverted image, gathering from all CPUs */
+  if(rank != 0){
+    /* Send your section of the 2-D inverted image to CPU 0 */
+    int rc = MPI_Send(&h_inverse_final[startrow*256], rows_per_CPU * 256 * sizeof(Complex), MPI_CHAR, 0, 0, MPI_COMM_WORLD);
+    if(rc != MPI_SUCCESS){
+      cerr<<"Error sending data to CPU 0. Exiting.\n";
+      MPI_Finalize(); exit(1);
+    }
+
+  } else if (rank == 0){
+    /* Collect parts of the 2-D inverted image from rest of CPUs and stitch them together */
+    MPI_Status status; MPI_Request request; int rc;
+    for(int cpu=1; cpu<nCPUs; cpu++){
+      rc = MPI_Irecv(&h_inverse_final[rows_per_CPU*cpu*256], rows_per_CPU * 256 * sizeof(Complex), MPI_CHAR, cpu, 0, MPI_COMM_WORLD, &request);
+      if(rc != MPI_SUCCESS){
+        cerr<<"Error receiving data from CPU "<<cpu<<". Exiting.\n";
+        MPI_Finalize(); exit(1);
+      }
+      MPI_Wait(&request, &status);
+      printf("  (Rank %2d)  Part of 2-D inverted image received [ OK ]\n\n",cpu);
+    }
+
+    /* Step WW: Do Transpose of final 2-D transform array */
+    transpose(h_inverse_final, 256);
+    printf("  (Rank %2d)  Transpose of 2-D inverted image [ OK ]\n\n",rank);
+
+    /* Step VV: Save 2-D transform image data for debug */
+    image.SaveImageData("MyAfterInverse.txt", h_inverse_final, width, height);
+    cout<<"  ---- File written ----: MyAfterInverse.txt\t[ OK ]"<<endl<<endl;
   }
 }
 
