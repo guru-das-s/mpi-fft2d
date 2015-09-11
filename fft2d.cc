@@ -69,10 +69,10 @@ void Inverse1D(Complex* H, int w, Complex* h, int startrow, int rows_per_CPU, in
     for(n=N*row; n<N*(row+1); n++){
       sum.real = 0; sum.imag = 0;
       for(k=0; k<N; k++){
-        W.real = cos(2*M_PI*n*k/N); W.imag = sin(2*M_PI*n*k/N);
+        W.real = cos(2*M_PI*n*k/N); W.imag = sin(2*M_PI*n*k/N);  // Diff from transform: sign of sin term is +, not -
         sum = sum + (W * H[(N*row) + k]);
       }
-      h[n].real = (1/ (float)(N))*sum.real;
+      h[n].real = (1/ (float)(N))*sum.real; // Diff from transform: magnitude reduced to (1/N)th
       h[n].imag = (1/ (float)(N))*sum.imag;
     } 
 
@@ -121,20 +121,20 @@ void Transform2D(const char* inputFN)
   MPI_Comm_size(MPI_COMM_WORLD, &nCPUs);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-  /* ----- :  Calculate number of rows per CPU and startrow */
-  int rows_per_CPU = height / nCPUs/******* TODO nCPUs ********/;
+  /* Step 3:  Calculate number of rows per CPU and startrow */
+  int rows_per_CPU = height / nCPUs;
   int startrow = rows_per_CPU * rank;
   
-  /* Step 3:  Create the H array that contains the 2-D DFT results */
+  /* Step 4:  Create the H array that contains the 2-D DFT results */
   Complex* H = new Complex[width * height];
 
-  /* Step 4:  Get the data of the input image, namely create the h array */
+  /* Step 5:  Get the data of the input image, namely create the h array */
   Complex* h = image.GetImageData();
 
-  /* Step 5:  Do 1-D transform of input image */
+  /* Step 6:  Do 1-D transform of input image */
   Transform1D(h, width, H, startrow, rows_per_CPU, 1);
 
-  /* Step GG: Stitch together pieces of 1D X-formed image, gathering from all CPUs */
+  /* Step 7: Stitch together pieces of 1D X-formed image, gathering from all CPUs */
   if(rank != 0){
     /* Send your section of the 1-D transformed image to CPU 0 */
     int rc = MPI_Send(&H[startrow*width], rows_per_CPU * width * sizeof(Complex), MPI_CHAR, 0, 0, MPI_COMM_WORLD);
@@ -157,16 +157,16 @@ void Transform2D(const char* inputFN)
       printf("  (Rank %2d)  Part of 1-D X-form received \t[ OK ]\n\n",cpu);
     }
 
-    /* Step VV: Save 1-D transform image data for debug */
+    /* Step 8: Save 1-D transform image data for debug */
     image.SaveImageData("MyAfter1d.txt", H, width, height);
     cout<<"  ---- File written ----: MyAfter1d.txt\t\t[ OK ]"<<endl<<endl;
 
-    /* Step WW: Do Transpose of intermediate 1-D transform array */
+    /* Step 9: Do Transpose of intermediate 1-D transform array */
     transpose(H, width);
     printf("  (Rank %2d)  Transpose of 1-D transformed image [ OK ]\n\n",rank);
   }
   
-  /* Step MM: Send entire Transpose of 1-D transformed image to all other CPUs */
+  /* Step 10: Send entire Transpose of 1-D transformed image to all other CPUs */
   if(rank==0){
     /* Send to all CPUs */
     MPI_Status status; MPI_Request request; int rc;
@@ -190,11 +190,11 @@ void Transform2D(const char* inputFN)
     MPI_Wait(&request, &status);    
   }
 
-  /* Step XX: Do 1-D transform again on the transpose array using MPI */
+  /* Step 11: Do 1-D transform again on the transpose array using MPI */
   Complex* H_final = new Complex[width * height];
   Transform1D(H, width, H_final, startrow, rows_per_CPU, 2);
 
-  /* Step NN: Stitch together pieces of 2D X-formed image, gathering from all CPUs */
+  /* Step 12: Stitch together pieces of 2D X-formed image, gathering from all CPUs */
   if(rank != 0){
     /* Send your section of the 1-D transformed image to CPU 0 */
     int rc = MPI_Send(&H_final[startrow*width], rows_per_CPU * width * sizeof(Complex), MPI_CHAR, 0, 0, MPI_COMM_WORLD);
@@ -216,21 +216,21 @@ void Transform2D(const char* inputFN)
       printf("  (Rank %2d)  Part of 1-D X-form received \t[ OK ]\n\n",cpu);
     }
 
-    /* Step WW: Do Transpose of final 2-D transform array */
+    /* Step 13: Do Transpose of final 2-D transform array */
     transpose(H_final, width);
     printf("  (Rank %2d)  Transpose of 2-D transformed image [ OK ]\n\n",rank);
 
-    /* Step VV: Save 2-D transform image data for debug */
+    /* Step 14: Save 2-D transform image data for debug */
     image.SaveImageData("MyAfter2d.txt", H_final, width, height);
     cout<<"  ---- File written ----: MyAfter2d.txt\t\t[ OK ]"<<endl<<endl;
   }
 
   // ---------------------------------------------------------------------------------------------------------------------------------
 
-  /* Step SS: Create copy of H_final, H_final_copy that holds the entire H_final image */
+  /* Step 15: Create copy of H_final, H_final_copy that holds the entire H_final image */
   Complex* H_final_copy = new Complex[width * height];
 
-  /* Step FF: Send entire 2-D transformed image to all other CPUs for their local copy */
+  /* Step 16: Send entire 2-D transformed image to all other CPUs for their local copy */
   if(rank==0){
     /* Send to all CPUs */
     MPI_Status status; MPI_Request request; int rc;
@@ -254,14 +254,14 @@ void Transform2D(const char* inputFN)
     MPI_Wait(&request, &status);    
   }
 
- /* Step BB: Do inverse transform on the transpose array using MPI */
+ /* Step 17: Do inverse transform on the transpose array using MPI */
  Complex* h_inverse = new Complex[width * height];
  if(rank != 0)
    Inverse1D(H_final_copy, width, h_inverse , startrow, rows_per_CPU, 1);
  else
    Inverse1D(H_final, width, h_inverse , startrow, rows_per_CPU, 1);
 
-  /* Step TT: Stitch together pieces of 1D inverted image, gathering from all CPUs */
+  /* Step 18: Stitch together pieces of 1D inverted image, gathering from all CPUs */
  if(rank != 0){
  /* Send your section of the 1-D transformed image to CPU 0 */
  int rc = MPI_Send(&h_inverse[startrow*width], rows_per_CPU * width * sizeof(Complex), MPI_CHAR, 0, 0, MPI_COMM_WORLD);
@@ -284,12 +284,12 @@ void Transform2D(const char* inputFN)
       printf("  (Rank %2d)  Part of 1-D inverted image received \t[ OK ]\n\n",cpu);
     }
 
-   /* Step EE: Do Transpose of intermediate 1-D inverted array */
+   /* Step 19: Do Transpose of intermediate 1-D inverted array */
    transpose(h_inverse, width);
    printf("  (Rank %2d)  Transpose of 1-D inverted image \t[ OK ]\n\n",rank);
  }
 
-  /* Step AA: Send entire Transpose of 1-D inverted image to all other CPUs */
+  /* Step 20: Send entire Transpose of 1-D inverted image to all other CPUs */
   if(rank==0){
     /* Send to all CPUs */
     MPI_Status status; MPI_Request request; int rc;
@@ -313,11 +313,11 @@ void Transform2D(const char* inputFN)
     MPI_Wait(&request, &status);    
   }
 
-  /* Step ZZ: Do 1-D transform again on the transpose array using MPI */
+  /* Step 21: Do 1-D transform again on the transpose array using MPI */
   Complex* h_inverse_final = new Complex[width * height];
   Inverse1D(h_inverse, width, h_inverse_final, startrow, rows_per_CPU, 2);
 
-  /* Step QQ: Stitch together pieces of 2D inverted image, gathering from all CPUs */
+  /* Step 22: Stitch together pieces of 2D inverted image, gathering from all CPUs */
   if(rank != 0){
     /* Send your section of the 2-D inverted image to CPU 0 */
     int rc = MPI_Send(&h_inverse_final[startrow*width], rows_per_CPU * width * sizeof(Complex), MPI_CHAR, 0, 0, MPI_COMM_WORLD);
@@ -339,11 +339,11 @@ void Transform2D(const char* inputFN)
       printf("  (Rank %2d)  Part of 2-D inverted image received [ OK ]\n\n",cpu);
     }
 
-    /* Step WW: Do Transpose of final 2-D transform array */
+    /* Step 23: Do Transpose of final 2-D transform array */
     transpose(h_inverse_final, width);
     printf("  (Rank %2d)  Transpose of 2-D inverted image [ OK ]\n\n",rank);
 
-    /* Step VV: Save 2-D transform image data for debug */
+    /* Step 24: Save 2-D transform image data for debug */
     image.SaveImageData("MyAfterInverse.txt", h_inverse_final, width, height);
     cout<<"  ---- File written ----: MyAfterInverse.txt\t[ OK ]"<<endl<<endl;
   }
@@ -363,7 +363,7 @@ int main(int argc, char** argv)
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-  string fn("Tower-Large.txt");               // default file name
+  string fn("Tower.txt");               // default file name
   if (argc > 1) fn = string(argv[1]);   // if name specified on cmd line
   Transform2D(fn.c_str());              // Perform the transform.
 
